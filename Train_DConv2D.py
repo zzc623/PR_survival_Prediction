@@ -21,20 +21,14 @@ import datetime, time
 import utils.ckpt as ckpt
 import random
 import copy
-from ops import *
 
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
-
-# from imblearn.pipeline import make_pipeline
-# from imblearn.over_sampling import SMOTE
-# from imblearn.combine import SMOTEENN, SMOTETomek
 
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
-# os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '1'
 
 
 from numpy.random import seed
@@ -114,39 +108,6 @@ class model(object):
         # p_lik = tf.gather(score, ix) - tf.log(tf.reduce_sum(tf.transpose(tf.exp(score)), axis=-1))
         loss    = -tf.reduce_mean(p_lik)
 
-        return loss
-
-    def hinge_loss(self, score, time_value, event):
-        '''
-        Args
-        score:	 	predicted score, tf tensor of shape (None, 1)
-        time_value:		true survival time_value, tf tensor of shape (None, )
-        event:		event, tf tensor of shape (None, )
-        '''
-        ## find index pairs (i,j) satisfying time_value[i]<time_value[j] and event[i]==1
-        ix = tf.where(tf.logical_and(tf.expand_dims(time_value, axis=-1) < time_value,
-                                     tf.expand_dims(tf.cast(event, tf.bool), axis=-1)), name='ix')
-        ## if score[i]>score[j], incur hinge loss
-        s1 = tf.gather(score, ix[:, 0])
-        s2 = tf.gather(score, ix[:, 1])
-        loss = tf.reduce_mean(tf.maximum(1 + s1 - s2, 0.0), name='loss')
-
-        return loss
-
-    def log_loss(self, score, time_value, event):
-        '''
-        Args
-        score: 	predicted survival time_value, tf tensor of shape (None, 1)
-        time_value:		true survival time_value, tf tensor of shape (None, )
-        event:		event, tf tensor of shape (None, )
-        '''
-        ## find index pairs (i,j) satisfying time_value[i]<time_value[j] and event[i]==1
-        ix = tf.where(tf.logical_and(tf.expand_dims(time_value, axis=-1) < time_value,
-                                     tf.expand_dims(tf.cast(event, tf.bool), axis=-1)), name='ix')
-        ## if score[i]>score[j], incur log loss
-        s1 = tf.gather(score, ix[:, 0])
-        s2 = tf.gather(score, ix[:, 1])
-        loss = tf.reduce_mean(tf.log(1 + tf.exp(s1 - s2)), name='loss')
         return loss
 
     def __concordance_index(self, score, time_value, event):
@@ -230,56 +191,6 @@ class model(object):
             current_time    = datetime.datetime.now().strftime("%Y%m%d-%H%M")
             checkpoints_dir = checkpointdir.format(current_time)
         ####################################################################################
-        # Read the filename of Training dataset
-        data_zd   = np.load('./DataSet/ROI_Zhongda_160re.npy',   allow_pickle=True)
-        data_nf_1 = np.load('./DataSet/ROI_nanfang_1_160re.npy', allow_pickle=True)  
-        data_nf_0 = np.load('./DataSet/ROI_nanfang_0_160re.npy', allow_pickle=True)  
-
-        train_data_0 = data_nf_0[0:np.uint16(1. * len(data_nf_0))]
-        train_data_1 = data_nf_1[0:np.uint16(1. * len(data_nf_1))]
-
-        self.param['batchsize'] = 128  # np.uint16(len(train_data_0))
-        self.param['n_positve'] = 1
-
-        ##################################################################
-        train_img_0_WO_aug  = np.empty([np.uint16(len(train_data_0)), 160, 160, 3], dtype=np.float32)
-        train_PM_0_WO_aug   = np.empty([np.uint16(len(train_data_0)), 1], dtype=np.float32)
-        train_DFS_0_WO_aug  = np.empty([np.uint16(len(train_data_0))], dtype=np.float32)
-        train_st_0_WO_aug   = np.empty([np.uint16(len(train_data_0))], dtype=np.float32)
-
-        train_img_1_WO_aug  = np.empty([np.uint16(len(train_data_1)), 160, 160, 3], dtype=np.float32)
-        train_PM_1_WO_aug   = np.empty([np.uint16(len(train_data_1)), 1], dtype=np.float32)
-        train_DFS_1_WO_aug  = np.empty([np.uint16(len(train_data_1))], dtype=np.float32)
-        train_st_1_WO_aug   = np.empty([np.uint16(len(train_data_1))], dtype=np.float32)
-
-        for i in range(np.uint16(len(train_data_0))):
-            train_img_0_WO_aug[i, :, :, :]  = train_data_0[i]['img']
-            train_PM_0_WO_aug[i, :]         = train_data_0[i]['PM'][0]
-            train_DFS_0_WO_aug[i]           = train_data_0[i]['DFS'][0]
-            train_st_0_WO_aug[i]            = train_data_0[i]['st'][0]
-        for i in range(np.uint16(len(train_data_1))):
-            train_img_1_WO_aug[i, :, :, :]  = train_data_1[i]['img']
-            train_PM_1_WO_aug[i, :]         = train_data_1[i]['PM'][0]
-            train_DFS_1_WO_aug[i]           = train_data_1[i]['DFS'][0]
-            train_st_1_WO_aug[i]            = train_data_1[i]['st'][0]
-
-        train_img   = np.concatenate([train_img_0_WO_aug, train_img_1_WO_aug], axis=0)
-        train_PM    = np.concatenate([train_PM_0_WO_aug, train_PM_1_WO_aug], axis=0)
-        train_DFS   = np.concatenate([train_DFS_0_WO_aug, train_DFS_1_WO_aug], axis=0)
-        train_st    = np.concatenate([train_st_0_WO_aug, train_st_1_WO_aug], axis=0)
-
-        ##################################################################
-        valid_data  = data_zd  
-        valid_img   = np.empty([np.uint16(len(valid_data)), 160, 160, 3], dtype=np.float32)
-        valid_PM    = np.empty([np.uint16(len(valid_data)), 1], dtype=np.float32)
-        valid_DFS   = np.empty([np.uint16(len(valid_data))], dtype=np.float32)
-        valid_st    = np.empty([np.uint16(len(valid_data))], dtype=np.float32)
-
-        for i in range(np.uint16(len(valid_data))):
-            valid_img[i, :, :, :]   = valid_data[i]['img']
-            valid_PM[i, :]          = valid_data[i]['PM'][0]
-            valid_DFS[i]            = valid_data[i]['DFS'][0]
-            valid_st[i]             = valid_data[i]['st'][0]
 
         #####################################################################################
 
@@ -411,14 +322,12 @@ class model(object):
 
                     if (epoch + 1) % 1 == 0:
                         var_list = [var for var in tf.global_variables()]
-                        print(time.asctime(time.localtime(time.time())),
-                              'the %d-th iterations. Saving Models...' % epoch)
-                        ckpt.save_ckpt(sess=sess, mode_name='model.ckpt', save_dir=checkpoints_dir, global_step=epoch,
-                                       var_list=var_list)
+                        print(time.asctime(time.localtime(time.time())), 'the %d-th iterations. Saving Models...' % epoch)
+                        ckpt.save_ckpt(sess=sess, mode_name='model.ckpt', save_dir=checkpoints_dir, global_step=epoch, var_list=var_list)
                         print("[*] Saving checkpoints SUCCESS! ")
 
 
 if __name__ == '__main__':
-    srcnn = model()
-    srcnn.train()
+    net = model()
+    net.train()
 
